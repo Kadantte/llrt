@@ -1,4 +1,6 @@
 import { spawn } from "child_process";
+import { platform } from "os";
+const IS_WINDOWS = platform() === "win32";
 
 describe("child_process.spawn", () => {
   it("should spawn a child process", (done) => {
@@ -7,7 +9,7 @@ describe("child_process.spawn", () => {
     const child = spawn(command, args);
     child.on("exit", (code) => {
       try {
-        assert.strictEqual(code, 0);
+        expect(code).toEqual(0);
         done();
       } catch (error) {
         done(error);
@@ -15,7 +17,9 @@ describe("child_process.spawn", () => {
     });
   });
   it("should spawn in a diffrent directory", (done) => {
-    const child = spawn("pwd", { cwd: "./tests" });
+    const child = spawn("pwd", {
+      cwd: "./tests",
+    });
     let output = "";
     child.stdout.on("data", (data) => {
       output += data.toString();
@@ -23,8 +27,9 @@ describe("child_process.spawn", () => {
 
     child.on("close", (code) => {
       try {
-        assert.strictEqual(output.trim(), `${process.cwd()}/tests`);
-        assert.strictEqual(code, 0);
+        const dir = output.trim().split("/").at(-1);
+        expect(dir).toEqual("tests");
+        expect(code).toEqual(0);
         done();
       } catch (error) {
         done(error);
@@ -42,8 +47,8 @@ describe("child_process.spawn", () => {
 
     child.on("close", (code) => {
       try {
-        assert.strictEqual(output.trim(), args[0]);
-        assert.strictEqual(code, 0);
+        expect(output.trim()).toEqual(args[0]);
+        expect(code).toEqual(0);
         done();
       } catch (error) {
         done(error);
@@ -66,8 +71,8 @@ describe("child_process.spawn", () => {
 
     child.on("close", (code) => {
       try {
-        assert.strictEqual(code, 0);
-        assert.strictEqual(output.trim(), input);
+        expect(code).toEqual(0);
+        expect(output.trim()).toEqual(input);
         done();
       } catch (error) {
         done(error);
@@ -84,7 +89,7 @@ describe("child_process.spawn", () => {
     const child = spawn(command);
     child.on("error", (err) => {
       try {
-        assert.ok(err);
+        expect(err).toBeTruthy();
         done();
       } catch (error) {
         done(error);
@@ -93,13 +98,16 @@ describe("child_process.spawn", () => {
   });
 
   it("should handle child process termination", (done) => {
-    const command = "sleep 4; echo 123";
+    const command = "sleep 999";
     const child = spawn(command, { shell: true });
 
     child.on("exit", (code, signal) => {
       try {
-        assert.strictEqual(code, 0);
-        assert.strictEqual(signal, "SIGINT");
+        if (!IS_WINDOWS) {
+          expect(code).toEqual(0);
+        }
+
+        expect(signal).toEqual(IS_WINDOWS ? "SIGKILL" : "SIGINT");
         done();
       } catch (error) {
         done(error);
@@ -108,14 +116,14 @@ describe("child_process.spawn", () => {
 
     setTimeout(() => {
       child.kill("SIGINT");
-    }, 5);
+    }, 50);
   });
 
   it("should handle child process stdio inherit", (done) => {
     const child = spawn("echo", ["123"], { stdio: "inherit" });
     child.on("exit", (code) => {
       try {
-        assert.strictEqual(code, 0);
+        expect(code).toEqual(0);
         done();
       } catch (error) {
         done(error);
@@ -126,7 +134,7 @@ describe("child_process.spawn", () => {
     const child = spawn("echo", ["123"], { stdio: "ignore" });
     child.on("exit", (code) => {
       try {
-        assert.strictEqual(code, 0);
+        expect(code).toEqual(0);
         done();
       } catch (error) {
         done(error);

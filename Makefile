@@ -2,18 +2,16 @@ TARGET_linux_x86_64 = x86_64-unknown-linux-musl
 TARGET_linux_arm64 = aarch64-unknown-linux-musl
 TARGET_darwin_x86_64 = x86_64-apple-darwin
 TARGET_darwin_arm64 = aarch64-apple-darwin
+TARGET_windows_x86_64 = x86_64-pc-windows-gnu
+TARGET_windows_arm64 = aarch64-is-not-yet-supported
 RUST_VERSION = nightly
 TOOLCHAIN = +$(RUST_VERSION)
 BUILD_ARG = $(TOOLCHAIN) build -r
 BUILD_DIR = ./target/release
 BUNDLE_DIR = bundle
-ZSTD_LIB_ARGS = -j lib-nomt UNAME=Linux ZSTD_LIB_COMPRESSION=0 ZSTD_LIB_DICTBUILDER=0 AR="zig ar"
-ZSTD_LIB_CC_ARGS = -s -O3 -flto
-ZSTD_LIB_CC_arm64 = CC="zig cc -target aarch64-linux-musl $(ZSTD_LIB_CC_ARGS)"
-ZSTD_LIB_CC_x64 = CC="zig cc -target x86_64-linux-musl $(ZSTD_LIB_CC_ARGS)"
 
-TS_SOURCES = $(wildcard src/js/*.ts) $(wildcard src/js/@llrt/*.ts) $(wildcard tests/*.ts)
-STD_JS_FILE = $(BUNDLE_DIR)/@llrt/std.js
+TS_SOURCES = $(wildcard llrt_core/src/modules/js/*.ts) $(wildcard llrt_core/src/modules/js/@llrt/test/*.ts) $(wildcard llrt_core/src/modules/js/@llrt/*.ts) $(wildcard tests/unit/*.ts)
+STD_JS_FILE = $(BUNDLE_DIR)/js/@llrt/std.js
 
 RELEASE_ARCH_NAME_x64 = x86_64
 RELEASE_ARCH_NAME_arm64 = arm64
@@ -23,10 +21,10 @@ RELEASE_TARGETS = arm64 x64
 RELEASE_ZIPS = $(addprefix $(LAMBDA_PREFIX)-,$(RELEASE_TARGETS))
 
 ifeq ($(OS),Windows_NT)
-    DETECTED_OS := Windows
-	ARCH = x64
+	DETECTED_OS := windows
+	ARCH = x86_64
 else
-    DETECTED_OS := $(shell uname | tr A-Z a-z)
+	DETECTED_OS := $(shell uname | tr A-Z a-z)
 	ARCH = $(shell uname -m)
 endif
 
@@ -34,8 +32,16 @@ ifeq ($(ARCH),aarch64)
 	ARCH = arm64
 endif
 
-CURRENT_TARGET ?= $(TARGET_$(DETECTED_OS)_$(ARCH))
+ZSTD_LIB_CC_ARGS = -s -O3 -flto
+ZSTD_LIB_ARGS = -j lib-nomt UNAME=Linux ZSTD_LIB_COMPRESSION=0 ZSTD_LIB_DICTBUILDER=0 AR="zig ar"
+ifeq ($(DETECTED_OS),windows)
+ZSTD_LIB_CC_x64 = CC="zig cc -target x86_64-windows-gnu $(ZSTD_LIB_CC_ARGS)"
+else
+ZSTD_LIB_CC_arm64 = CC="zig cc -target aarch64-linux-musl $(ZSTD_LIB_CC_ARGS)"
+ZSTD_LIB_CC_x64 = CC="zig cc -target x86_64-linux-musl $(ZSTD_LIB_CC_ARGS)"
+endif
 
+CURRENT_TARGET ?= $(TARGET_$(DETECTED_OS)_$(ARCH))
 
 export CC_aarch64_unknown_linux_musl = $(CURDIR)/linker/cc-aarch64-linux-musl
 export CXX_aarch64_unknown_linux_musl = $(CURDIR)/linker/cxx-aarch64-linux-musl
@@ -44,50 +50,77 @@ export CC_x86_64_unknown_linux_musl = $(CURDIR)/linker/cc-x86_64-linux-musl
 export CXX_x86_64_unknown_linux_musl = $(CURDIR)/linker/cxx-x86_64-linux-musl
 export AR_x86_64_unknown_linux_musl = $(CURDIR)/linker/ar
 
-lambda-all: libs $(RELEASE_ZIPS)
-release-all: | lambda-all llrt-linux-x64.zip llrt-linux-arm64.zip llrt-darwin-x64.zip llrt-darwin-arm64.zip
-release: llrt-$(DETECTED_OS)-$(ARCH).zip
-release-linux: | lambda-all llrt-linux-x64.zip llrt-linux-arm64.zip
-release-darwin: | llrt-darwin-x64.zip llrt-darwin-arm64.zip
+define alias_template
+release${1}: llrt-$(DETECTED_OS)-$(ARCH)${1}.zip
 
-llrt-darwin-x64.zip: | clean-js js
-	cargo $(BUILD_ARG) --target $(TARGET_darwin_x86_64)
-	zip -j $@ target/$(TARGET_darwin_x86_64)/release/llrt
-
-llrt-darwin-arm64.zip: | clean-js js
-	cargo $(BUILD_ARG) --target $(TARGET_darwin_arm64)
-	zip -j $@ target/$(TARGET_darwin_arm64)/release/llrt
-
-llrt-linux-x64.zip: | clean-js js
-	cargo $(BUILD_ARG) --target $(TARGET_linux_x86_64)
-	zip -j $@ target/$(TARGET_linux_x86_64)/release/llrt
-
-llrt-linux-arm64.zip: | clean-js js
-	cargo $(BUILD_ARG) --target $(TARGET_linux_arm64)
-	zip -j $@ target/$(TARGET_linux_arm64)/release/llrt
-
-define release_template
-release-${1}: | clean-js js
-	cargo $$(BUILD_ARG) --target $$(TARGET_linux_$$(RELEASE_ARCH_NAME_${1})) --features lambda -vv
-	./pack target/$$(TARGET_linux_$$(RELEASE_ARCH_NAME_${1}))/release/llrt target/$$(TARGET_linux_$$(RELEASE_ARCH_NAME_${1}))/release/bootstrap
-	@rm -rf llrt-lambda-${1}.zip
-	zip -j llrt-lambda-${1}.zip target/$$(TARGET_linux_$$(RELEASE_ARCH_NAME_${1}))/release/bootstrap
-
-llrt-lambda-${1}: release-${1}
+llrt-linux-x86_64${1}.zip: llrt-linux-x64${1}.zip
+llrt-windows-x86_64${1}.zip: llrt-windows-x64${1}.zip
+llrt-darwin-x86_64${1}.zip: llrt-darwin-x64${1}.zip
 endef
 
-$(foreach target,$(RELEASE_TARGETS),$(eval $(call release_template,$(target))))
+$(eval $(call alias_template,-full-sdk))
+$(eval $(call alias_template,))
+$(eval $(call alias_template,-no-sdk))
+
+define release_template
+release-aws-${1}${2}: | llrt-lambda-${1}${2}.zip llrt-container-${1}${2} llrt-linux-${1}${2}.zip
+
+llrt-lambda-${1}${2}.zip: export SDK_BUNDLE_MODE = ${3}
+llrt-lambda-${1}${2}.zip: | clean-js js
+	cargo $$(BUILD_ARG) --target $$(TARGET_linux_$$(RELEASE_ARCH_NAME_${1})) --features lambda
+	./pack target/$$(TARGET_linux_$$(RELEASE_ARCH_NAME_${1}))/release/llrt target/$$(TARGET_linux_$$(RELEASE_ARCH_NAME_${1}))/release/bootstrap
+	@rm -rf $$@
+	zip -j $$@ target/$$(TARGET_linux_$$(RELEASE_ARCH_NAME_${1}))/release/bootstrap
+
+llrt-container-${1}${2}: export SDK_BUNDLE_MODE = ${3}
+llrt-container-${1}${2}: | clean-js js
+	cargo $$(BUILD_ARG) --target $$(TARGET_linux_$$(RELEASE_ARCH_NAME_${1})) --features lambda,uncompressed
+	mv target/$$(TARGET_linux_$$(RELEASE_ARCH_NAME_${1}))/release/llrt $$@
+
+llrt-linux-${1}${2}.zip: export SDK_BUNDLE_MODE = ${3}
+llrt-linux-${1}${2}.zip: | clean-js js
+	cargo $$(BUILD_ARG) --target $$(TARGET_linux_$$(RELEASE_ARCH_NAME_${1}))
+	@rm -rf $$@
+	zip -j $$@ target/$$(TARGET_linux_$$(RELEASE_ARCH_NAME_${1}))/release/llrt
+
+llrt-darwin-${1}${2}.zip: export SDK_BUNDLE_MODE = ${3}
+llrt-darwin-${1}${2}.zip: | clean-js js
+	cargo $$(BUILD_ARG) --target $$(TARGET_darwin_$$(RELEASE_ARCH_NAME_${1}))
+	@rm -rf $$@
+	zip -j $$@ target/$$(TARGET_darwin_$$(RELEASE_ARCH_NAME_${1}))/release/llrt
+
+# llrt-windows-arm64* is automatically generated, but not currently supported.
+llrt-windows-${1}${2}.zip: export SDK_BUNDLE_MODE = ${3}
+llrt-windows-${1}${2}.zip: | clean-js js
+	cargo $$(BUILD_ARG) --target $$(TARGET_windows_$$(RELEASE_ARCH_NAME_${1}))
+	zip -j $$@ target/$$(TARGET_windows_$$(RELEASE_ARCH_NAME_${1}))/release/llrt.exe
+endef
+
+$(foreach target,$(RELEASE_TARGETS),$(eval $(call release_template,$(target),-full-sdk,FULL)))
+$(foreach target,$(RELEASE_TARGETS),$(eval $(call release_template,$(target),,STD)))
+$(foreach target,$(RELEASE_TARGETS),$(eval $(call release_template,$(target),-no-sdk,NONE)))
 
 build: js
 	cargo $(BUILD_ARG) --target $(CURRENT_TARGET)
 
+ifeq ($(DETECTED_OS),windows)
 stdlib:
+	rustup target add $(TARGET_windows_x86_64)
+	rustup toolchain install $(RUST_VERSION) --target $(TARGET_windows_x86_64)
+	rustup component add rust-src --toolchain $(RUST_VERSION) --target $(TARGET_windows_x86_64)
+else
+stdlib-x64:
 	rustup target add $(TARGET_linux_x86_64)
-	rustup target add $(TARGET_linux_arm64)
 	rustup toolchain install $(RUST_VERSION) --target $(TARGET_linux_x86_64)
+	rustup component add rust-src --toolchain $(RUST_VERSION) --target $(TARGET_linux_x86_64)
+
+stdlib-arm64:
+	rustup target add $(TARGET_linux_arm64)
 	rustup toolchain install $(RUST_VERSION) --target $(TARGET_linux_arm64)
 	rustup component add rust-src --toolchain $(RUST_VERSION) --target $(TARGET_linux_arm64)
-	rustup component add rust-src --toolchain $(RUST_VERSION) --target $(TARGET_linux_x86_64)
+
+stdlib: | stdlib-x64 stdlib-arm64
+endif
 
 toolchain:
 	rustup target add $(CURRENT_TARGET)
@@ -103,16 +136,17 @@ clean: clean-js
 
 js: $(STD_JS_FILE)
 
-bundle/%.js: $(TS_SOURCES)
+bundle/js/%.js: $(TS_SOURCES)
 	node build.mjs
 
 fix:
+	npx pretty-quick
 	cargo fix --allow-dirty
 	cargo clippy --fix --allow-dirty
 	cargo fmt
 
 bloat: js
-	cargo build --profile=flame --target $(TARGET_linux_x86_64)
+	cargo build --profile=flame --target $(CURRENT_TARGET)
 	cargo bloat --profile=flame --crates
 
 run: export AWS_LAMBDA_FUNCTION_NAME = n/a
@@ -123,8 +157,8 @@ run: export _EXIT_ITERATIONS = 1
 run: export JS_MINIFY = 0
 run: export RUST_LOG = llrt=trace
 run: export _HANDLER = index.handler
-run: | clean-js js
-	cargo run -r -vv
+run:
+	cargo run -vv
 
 run-ssr: export AWS_LAMBDA_RUNTIME_API = localhost:3000
 run-ssr: export TABLE_NAME=quickjs-table
@@ -134,9 +168,8 @@ run-ssr: js
 	cargo build
 	cd example/functions && yarn build && cd build && ../../../target/debug/llrt
 
-flame: export CARGO_PROFILE_RELEASE_DEBUG = true
 flame:
-	cargo flamegraph
+	cargo flamegraph --profile flame -- index.mjs
 
 run-cli: export RUST_LOG = llrt=trace
 run-cli: js
@@ -144,14 +177,18 @@ run-cli: js
 
 test: export JS_MINIFY = 0
 test: js
-	cargo run -- test -d bundle/__tests__/tests/unit
+	cargo run -- test -d bundle/js/__tests__/unit
+test-e2e: export JS_MINIFY = 0
+test-e2e: export TEST_TIMEOUT = 60000
+test-e2e: export SDK_BUNDLE_MODE = STD
 test-e2e: js
-	cargo run -- test -d bundle/__tests__/tests/e2e
+	cargo run -- test -d bundle/js/__tests__/e2e
 
 test-ci: export JS_MINIFY = 0
+test-ci: export RUST_BACKTRACE = 1
 test-ci: clean-js | toolchain js
-	cargo $(TOOLCHAIN) -Z panic-abort-tests test --target $(CURRENT_TARGET)
-#	cargo $(TOOLCHAIN) run -r --target $(CURRENT_TARGET) -- test -d bundle/__tests__/tests/e2e # temporary skip e2e tests when running on Github
+	cargo $(TOOLCHAIN) -Z build-std -Z build-std-features test --target $(CURRENT_TARGET) -- --nocapture --show-output
+	cargo $(TOOLCHAIN) run -r --target $(CURRENT_TARGET) -- test -d bundle/js/__tests__/unit
 
 libs-arm64: lib/arm64/libzstd.a lib/zstd.h
 libs-x64: lib/x64/libzstd.a lib/zstd.h
@@ -175,9 +212,12 @@ lib/x64/libzstd.a:
 
 bench:
 	cargo build -r
-	hyperfine -N --warm64up=100 "node fixtures/hello.js" "deno run fixtures/hello.js" "bun fixtures/hello.js" "$(BUILD_DIR)/llrt fixtures/hello.js" "qjs fixtures/hello.js"
+	hyperfine -N --warmup=100 "node fixtures/hello.js" "deno run fixtures/hello.js" "bun fixtures/hello.js" "$(BUILD_DIR)/llrt fixtures/hello.js" "qjs fixtures/hello.js"
 
 deploy:
 	cd example/infrastructure && yarn deploy --require-approval never
 
-.PHONY: libs libs-arm64 libs-x64 toolchain clean-js release-linux release-darwin lambda stdlib test test-ci run js run-release build release clean flame deploy
+check:
+	cargo clippy --all-targets --all-features -- -D warnings
+
+.PHONY: libs check libs-arm64 libs-x64 toolchain clean-js release-linux release-darwin release-windows lambda stdlib stdlib-x64 stdlib-arm64 test test-ci run js run-release build release clean flame deploy

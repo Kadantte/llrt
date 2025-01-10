@@ -14,15 +14,20 @@ on:
       release:
         required: false
         type: string
+      toolchain:
+        required: false
+        type: string
+        default: "nightly"
 
 jobs:
   build:
     runs-on: ${{ inputs.os }}
+    name: build ${{ inputs.arch }}-${{ inputs.platform }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          submodules: true
+      - name: Checkout submodules
+        run: git submodule update --init --checkout
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -41,42 +46,55 @@ jobs:
         run: |
           /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
           brew install zig make
-      - name: Install Windows dependencies
+      - name: Install zig on windows
         if: inputs.platform == 'windows'
         shell: pwsh
         run: |
           Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
           iex "& {$(irm get.scoop.sh)} -RunAsAdmin"
-          scoop install make zig
+          scoop install zig
+      - name: Install Windows dependencies
+        if: inputs.platform == 'windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          path-type: inherit
+          install: >-
+            mingw-w64-x86_64-make
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-clang
+            mingw-w64-x86_64-perl
+            zip
+            zstd
+            patch
+            unzip
+
       - name: Install JavaScript dependencies
         run: |
           corepack enable
           yarn
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: nightly
-      - name: Cargo cache
-        uses: actions/cache@v4
-        continue-on-error: false
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          toolchain: ${{ inputs.toolchain }}
       - name: Run tests
-        if: inputs.arch != 'aarch64' || inputs.platform != 'linux'
+        if: (inputs.arch != 'aarch64' || inputs.platform != 'linux') && inputs.platform != 'windows'
         run: |
-          make test-ci
-      - name: Run tests
+          make test-ci 2>&1
+      - name: Run tests on windows
+        if: inputs.platform == 'windows'
+        shell: msys2 {0}
+        run: |
+          make test-ci 2>&1
+
+      - name: Run tests on aarch64-linux
         if: inputs.arch == 'aarch64' && inputs.platform == 'linux'
         env:
           _VIRTUAL_ENV: qemu-aarch64
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUNNER: qemu-aarch64
+          TEST_TIMEOUT: 20000
         run: |
           sudo apt-get install -y \
             qemu-system-arm \
@@ -89,12 +107,26 @@ jobs:
         if: inputs.release && inputs.platform == 'linux'
         run: |
           make libs-${{ inputs.release }}
-          make llrt-linux-${{ inputs.release }}.zip
-          make release-${{ inputs.release }}
+          make release-aws-${{ inputs.release }}
+          make release-aws-${{ inputs.release }}-no-sdk
+          make release-aws-${{ inputs.release }}-full-sdk
       - name: Build Darwin binaries
         if: inputs.release && inputs.platform == 'darwin'
         run: |
           make llrt-darwin-${{ inputs.release }}.zip
+          make llrt-darwin-${{ inputs.release }}-no-sdk.zip
+          make llrt-darwin-${{ inputs.release }}-full-sdk.zip
+      - name: Build Windows binaries
+        if: inputs.release && inputs.platform == 'windows'
+        shell: msys2 {0}
+        run: |
+          # HACK: Add scoop/shims to PATH
+          export PATH="$PATH:/c/Users/$USER/scoop/shims"
+          make stdlib
+          make libs-${{ inputs.release }}
+          make llrt-windows-${{ inputs.release }}.zip
+          make llrt-windows-${{ inputs.release }}-no-sdk.zip
+          make llrt-windows-${{ inputs.release }}-full-sdk.zip
       - name: Upload artifacts
         if: inputs.release
         uses: actions/upload-artifact@v4
@@ -102,6 +134,8 @@ jobs:
           name: artifacts-${{ inputs.platform }}-${{ inputs.arch }}
           path: |
             *.zip
+            llrt-container-arm64*
+            llrt-container-x64*
       - name: Upload changelog
         if: inputs.release && inputs.platform == 'linux' && inputs.arch == 'x86_64'
         uses: actions/upload-artifact@v4

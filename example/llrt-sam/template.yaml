@@ -1,4 +1,4 @@
-AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >
   llrt-sam
@@ -11,7 +11,6 @@ Globals:
     Timeout: 3
 
 Resources:
-
   LlrtLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
@@ -34,17 +33,17 @@ Resources:
       BuildMethod: esbuild
       BuildProperties:
         External:
-          - '@aws-sdk'
-          - '@smithy'
+          - "@aws-sdk"
+          - "@smithy"
           - uuid
         Minify: false
-        Target: "es2020"
+        Target: "es2023"
         Sourcemap: false
         Format: esm
         OutExtension:
           - .js=.mjs
         EntryPoints:
-        - app.ts
+          - app.ts
 
 Outputs:
   HelloWorldFunction:
