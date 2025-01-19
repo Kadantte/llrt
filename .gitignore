@@ -6,7 +6,8 @@
 
 /lib
 /target
-/src/bytecode_cache.rs
+/llrt_core/target
+/llrt_core/src/bytecode_cache.rs
 /example/functions/build
 /slask
 /VERSION
@@ -15,6 +16,10 @@
 *.zip
 cdk.out
 flamegraph.svg
-node_modules
 out.stacks
 yarn-error.log
+llrt-container-*
+bootstrap
+
+node_modules
+!/fixtures/node_modules

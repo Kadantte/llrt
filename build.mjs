@@ -1,6 +1,6 @@
 import * as esbuild from "esbuild";
 import fs from "fs/promises";
-import {createRequire} from "module";
+import { createRequire } from "module";
 import path from "path";
 
 const require = createRequire(import.meta.url);
@@ -8,48 +8,55 @@ const require = createRequire(import.meta.url);
 process.env.NODE_PATH = ".";
 
 const TMP_DIR = `.tmp-llrt-aws-sdk`;
-const SRC_DIR = path.join("src", "js");
+const SRC_DIR = path.join("llrt_core", "src", "modules", "js");
 const TESTS_DIR = "tests";
-const OUT_DIR = "bundle";
+const OUT_DIR = "bundle/js";
 const SHIMS = new Map();
+const SDK_BUNDLE_MODE = process.env.SDK_BUNDLE_MODE || "NONE"; // "FULL" or "STD" or "NONE"
 
 async function readFilesRecursive(dir, filePredicate) {
   const dirents = await fs.readdir(dir, { withFileTypes: true });
-  const files = await Promise.all(dirents.map((dirent) => {
-    const filePath = path.join(dir, dirent.name);
+  const files = await Promise.all(
+    dirents.map((dirent) => {
+      const filePath = path.join(dir, dirent.name);
 
-    if (dirent.isDirectory()) {
-      return readFilesRecursive(filePath, filePredicate);
-    } else {
-      return filePredicate(filePath) ? filePath : [];
-    }
-  }));
+      if (dirent.isDirectory()) {
+        return readFilesRecursive(filePath, filePredicate);
+      } else {
+        return filePredicate(filePath) ? filePath : [];
+      }
+    })
+  );
   return Array.prototype.concat(...files);
 }
 
-const TEST_FILES = await readFilesRecursive(TESTS_DIR, (filePath)=> filePath.endsWith(".test.ts") || filePath.endsWith(".spec.ts"));
+const TEST_FILES = await readFilesRecursive(
+  TESTS_DIR,
+  (filePath) => filePath.endsWith(".test.ts") || filePath.endsWith(".spec.ts")
+);
 const AWS_JSON_SHARED_COMMAND_REGEX =
   /{\s*const\s*headers\s*=\s*sharedHeaders\(("\w+")\);\s*let body;\s*body\s*=\s*JSON.stringify\(_json\(input\)\);\s*return buildHttpRpcRequest\(context,\s*headers,\s*"\/",\s*undefined,\s*body\);\s*}/gm;
 const AWS_JSON_SHARED_COMMAND_REGEX2 =
   /{\s*const\s*headers\s*=\s*sharedHeaders\(("\w+")\);\s*let body;\s*body\s*=\s*JSON.stringify\((\w+)\(input,\s*context\)\);\s*return buildHttpRpcRequest\(context,\s*headers,\s*"\/",\s*undefined,\s*body\);\s*}/gm;
 const MINIFY_JS = process.env.JS_MINIFY !== "0";
 const SDK_UTILS_PACKAGE = "sdk-utils";
-const ENTRYPOINTS = ["@llrt/std", "stream", "@llrt/runtime", "@llrt/test"];
+const ENTRYPOINTS = ["stream", "@llrt/test/index", "@llrt/test/worker"];
 
 const ES_BUILD_OPTIONS = {
   splitting: MINIFY_JS,
   minify: MINIFY_JS,
   sourcemap: true,
-  target: "es2020",
+  target: "es2023",
   outdir: OUT_DIR,
   bundle: true,
   logLevel: "info",
   platform: "browser",
   format: "esm",
   external: [
+    "assert",
+    "console",
+    "node:console",
     "crypto",
-    "uuid",
-    "hex",
     "os",
     "fs",
     "child_process",
@@ -59,52 +66,120 @@ const ES_BUILD_OPTIONS = {
     "path",
     "events",
     "buffer",
-    "xml",
     "net",
+    "util",
+    "url",
+    "zlib",
+    "llrt:hex",
+    "llrt:uuid",
+    "llrt:xml",
+    "perf_hooks",
+    "tty",
   ],
 };
 
-const SDK_DATA = {
-  "client-dynamodb": ["DynamoDB", "dynamodb"],
-  "lib-dynamodb": ["DynamoDBDocument", "dynamodb"],
-  "client-kms": ["KMS", "kms"],
-  "client-lambda": ["Lambda", "lambda"],
-  "client-s3": ["S3", "s3"],
-  "client-secrets-manager": ["SecretsManager", "secretsmanager"],
-  "client-ses": ["SES", "email"],
-  "client-sns": ["SNS", "sns"],
-  "client-sqs": ["SQS", "sqs"],
-  "client-sts": ["STS", "sts"],
-  "client-ssm": ["SSM", "ssm"],
-  "client-cloudwatch-logs": ["CloudWatchLogs", "logs"],
-  "client-cloudwatch-events": ["CloudWatchEvents", "events"],
-  "client-eventbridge": ["EventBridge", "events"],
-  "client-sfn": ["SFN", "states"],
-  "client-xray": ["XRay", "xray"],
-  "client-cognito-identity": ["CognitoIdentity", "cognito-idp"],
-};
+const SDK_DATA = await parseSdkData();
 
 const ADDITIONAL_PACKAGES = [
-  "@aws-sdk/util-dynamodb",
-  "@smithy/signature-v4",
+  "@aws-sdk/core",
   "@aws-sdk/credential-providers",
+  "@aws-sdk/s3-presigned-post",
+  "@aws-sdk/s3-request-presigner",
+  "@aws-sdk/util-dynamodb",
+  "@aws-sdk/util-user-agent-browser",
+  "@smithy/config-resolver",
+  "@smithy/core",
+  "@smithy/eventstream-codec",
+  "@smithy/eventstream-serde-browser",
+  "@smithy/eventstream-serde-config-resolver",
+  "@smithy/eventstream-serde-universal",
+  "@smithy/fetch-http-handler",
+  "@smithy/invalid-dependency",
+  "@smithy/is-array-buffer",
+  "@smithy/middleware-compression",
+  "@smithy/middleware-content-length",
+  "@smithy/middleware-endpoint",
+  "@smithy/middleware-retry",
+  "@smithy/middleware-serde",
+  "@smithy/middleware-stack",
+  "@smithy/property-provider",
+  "@smithy/protocol-http",
+  "@smithy/querystring-builder",
+  "@smithy/querystring-parser",
+  "@smithy/service-error-classification",
+  "@smithy/signature-v4",
+  "@smithy/smithy-client",
+  "@smithy/types",
+  "@smithy/url-parser",
+  "@smithy/util-base64",
+  "@smithy/util-body-length-browser",
+  "@smithy/util-config-provider",
+  "@smithy/util-defaults-mode-browser",
+  "@smithy/util-endpoints",
+  "@smithy/util-hex-encoding",
+  "@smithy/util-middleware",
+  "@smithy/util-retry",
+  "@smithy/util-stream",
+  "@smithy/util-uri-escape",
+  "@smithy/util-utf8",
+  "@smithy/util-waiter",
 ];
 
-const SERVICE_ENDPOINT_BY_PACKAGE = {};
+const REPLACEMENT_PACKAGES = {
+  "@aws-crypto/sha1-browser": "shims/@aws-crypto/sha1-browser.js",
+  "@aws-crypto/sha256-browser": "shims/@aws-crypto/sha256-browser.js",
+  "@aws-crypto/crc32": "shims/@aws-crypto/crc32.js",
+  "@aws-crypto/crc32c": "shims/@aws-crypto/crc32c.js",
+  "@smithy/abort-controller": "shims/@smithy/abort-controller.js",
+};
+
+const SERVICE_ENDPOINTS_BY_PACKAGE = {};
 const CLIENTS_BY_SDK = {};
 const SDKS_BY_SDK_PACKAGES = {};
 const SDK_PACKAGES = [...ADDITIONAL_PACKAGES];
 
 Object.keys(SDK_DATA).forEach((sdk) => {
-  const [clientName, serviceEndpoint] = SDK_DATA[sdk] || [];
-  const sdkPackage = `@aws-sdk/${sdk}`;
-  SDK_PACKAGES.push(sdkPackage);
-  SDKS_BY_SDK_PACKAGES[sdkPackage] = sdk;
-  SERVICE_ENDPOINT_BY_PACKAGE[sdk] = serviceEndpoint;
-  CLIENTS_BY_SDK[sdk] = clientName;
+  const [clientName, serviceEndpoints, fullSdkOnly] = SDK_DATA[sdk] || [];
+  if (SDK_BUNDLE_MODE == "FULL" || (SDK_BUNDLE_MODE == "STD" && !fullSdkOnly)) {
+    const sdkPackage = `@aws-sdk/${sdk}`;
+    SDK_PACKAGES.push(sdkPackage);
+    SDKS_BY_SDK_PACKAGES[sdkPackage] = sdk;
+    SERVICE_ENDPOINTS_BY_PACKAGE[sdk] = serviceEndpoints;
+    CLIENTS_BY_SDK[sdk] = clientName;
+  }
 });
 
-function runtimeConfigWrapper(config) {
+async function parseSdkData() {
+  const cfgData = await fs.readFile("sdk.cfg");
+  const cfgLines = cfgData.toString().split("\n");
+
+  const sdkData = {};
+
+  for (let line of cfgLines) {
+    line = line.trim();
+    if (line.startsWith("#") || line == "") {
+      continue;
+    }
+
+    // Parse the line
+    const parts = line.split(",");
+
+    //get and remove the item at 0
+    const packageName = parts.shift();
+    const clientName = parts.shift();
+
+    //get and remove the last item
+    const fullSdkOnly = parts.pop() == 1;
+
+    const endpoints = parts;
+
+    // Log or store parsed information
+    sdkData[packageName] = [clientName, endpoints, fullSdkOnly];
+  }
+  return sdkData;
+}
+
+function resolveDefaultsModeConfigWrapper(config) {
   if (!config.credentials) {
     config.credentials = {
       accessKeyId: process.env.AWS_ACCESS_KEY_ID,
@@ -115,7 +190,7 @@ function runtimeConfigWrapper(config) {
   if (!config.region) {
     config.region = process.env.AWS_REGION;
   }
-  return getRuntimeConfig(config);
+  return resolveDefaultsModeConfig(config);
 }
 
 const awsJsonSharedCommand = (name, input, context, request) => {
@@ -152,9 +227,9 @@ function defaultEndpointResolver(endpointParams, context = {}) {
 
 const WRAPPERS = [
   {
-    name: "getRuntimeConfig",
-    filter: /runtimeConfig\.shared\.js$/,
-    wrapper: runtimeConfigWrapper,
+    name: "resolveDefaultsModeConfig",
+    filter: /resolveDefaultsModeConfig.js$/,
+    wrapper: resolveDefaultsModeConfigWrapper,
   },
 ];
 
@@ -224,7 +299,7 @@ function codeToRegex(fn, includeSignature = false) {
   );
 }
 
-const awsSdkPlugin = {
+const AWS_SDK_PLUGIN = {
   name: "aws-sdk-plugin",
   setup(build) {
     const tslib = require.resolve("tslib/tslib.es6.js");
@@ -356,6 +431,7 @@ const awsSdkPlugin = {
       build.onLoad({ filter }, async ({ path }) => {
         let source = (await fs.readFile(path)).toString();
         let replaced = false;
+        let contents = "";
         source = source.replace(
           RegExp(`export\\s*(const\\s*${name})`),
           (_, replacement) => {
@@ -364,12 +440,13 @@ const awsSdkPlugin = {
           }
         );
         if (!replaced) {
-          throw new Error(`No replacement found for "${name}" in ${filter}`);
+          contents += source;
+        } else {
+          const wrapperName = `${name}Wrapper`;
+          contents += `${source}\n`;
+          contents += `const ${wrapperName} = ${wrapper.toString()}\n`;
+          contents += `export {${wrapperName} as ${name}}`;
         }
-        const wrapperName = `${name}Wrapper`;
-        let contents = `${source}\n`;
-        contents += `const ${wrapperName} = ${wrapper.toString()}\n`;
-        contents += `export {${wrapperName} as ${name}}`;
 
         return {
           contents,
@@ -418,6 +495,15 @@ function esbuildShimPlugin(shims) {
   };
 }
 
+const requireProcessPlugin = {
+  name: "require-process",
+  setup(build) {
+    build.onResolve({ filter: /^process\/$/ }, () => {
+      return { path: "process", external: true };
+    });
+  },
+};
+
 async function rmTmpDir() {
   await fs.rm(TMP_DIR, {
     recursive: true,
@@ -439,50 +525,16 @@ async function loadShims() {
   };
 
   await Promise.all([
-    loadShim(/@smithy\/util-hex-encoding/, "util-hex-encoding.js"),
-    loadShim(/@aws-sdk\/util-utf8-browser/, "util-utf8.js"),
-    loadShim(/@smithy\/util-base64/, "util-base64.js"),
-    loadShim(/@aws-crypto/, "aws-crypto.js"),
-    loadShim(/mnemonist\/lru-cache\.js/, "lru-cache.js"),
-    loadShim(/sdk-stream-mixin.browser\.js/, "sdk-stream-mixin.js"),
+    loadShim(/@aws-crypto/, "@aws-crypto/index.js"),
+    loadShim(/@smithy\/util-hex-encoding/, "@smithy/util-hex-encoding.js"),
+    loadShim(/@smithy\/util-utf8/, "@smithy/util-utf8.js"),
+    loadShim(/@smithy\/util-base64/, "@smithy/util-base64.js"),
+    loadShim(/mnemonist\/lru-cache\.js/, "mnemonist/lru-cache.js"),
     loadShim(/collect-stream-body\.js/, "collect-stream-body.js"),
+    loadShim(/sdk-stream-mixin.browser\.js/, "sdk-stream-mixin.js"),
+    loadShim(/stream-collector\.js/, "stream-collector.js"),
+    loadShim(/splitStream.browser\.js/, "@smithy/split-stream.js"),
   ]);
-}
-
-const PACKAGE_NAME_CACHE = {};
-async function findPackageName(filePath) {
-  const firstDir = path.dirname(filePath);
-
-  if (PACKAGE_NAME_CACHE[firstDir]) {
-    return PACKAGE_NAME_CACHE[firstDir];
-  }
-
-  let currentDir = firstDir;
-  while (true) {
-    const packageJsonPath = path.join(currentDir, "package.json");
-
-    const packageJsonExists = await fs
-      .access(packageJsonPath)
-      .then(() => true)
-      .catch(() => false);
-
-    if (packageJsonExists) {
-      const packageJsonContent = await fs.readFile(packageJsonPath, "utf8");
-      const packageJson = JSON.parse(packageJsonContent);
-
-      if (packageJson && packageJson.name) {
-        PACKAGE_NAME_CACHE[firstDir] = packageJson.name;
-        return packageJson.name;
-      }
-    }
-
-    const parentDir = path.dirname(currentDir);
-    if (parentDir === currentDir) {
-      return null;
-    }
-
-    currentDir = parentDir;
-  }
 }
 
 async function buildLibrary() {
@@ -501,21 +553,22 @@ async function buildLibrary() {
   });
   await esbuild.build({
     ...defaultLibEsBuildOption,
-    entryPoints
+    entryPoints,
+    plugins: [requireProcessPlugin],
   });
 
   // Build tests
-  const testEntryPoints = {};
-  TEST_FILES.forEach((entry) => {
-    testEntryPoints[path.join("__tests__", `${entry.slice(0, -3)}`)] = entry;
-  });
+  const testEntryPoints = TEST_FILES.reduce((acc, entry) => {
+    const { name, dir } = path.parse(entry);
+    const parentDir = path.basename(dir);
+    acc[path.join("__tests__", parentDir, name)] = entry;
+    return acc;
+  }, {});
+
   await esbuild.build({
     ...defaultLibEsBuildOption,
     entryPoints: testEntryPoints,
-    external: [
-      ...ES_BUILD_OPTIONS.external,
-      "@aws-sdk", "@smithy", "uuid"
-    ],
+    external: [...ES_BUILD_OPTIONS.external, "@aws-sdk", "@smithy"],
   });
 }
 
@@ -525,14 +578,10 @@ async function buildSdks() {
       const packagePath = path.join(TMP_DIR, pkg);
       const sdk = SDKS_BY_SDK_PACKAGES[pkg];
       const sdkIndexFile = path.join(packagePath, "index.js");
-      const serviceName = SERVICE_ENDPOINT_BY_PACKAGE[sdk];
 
       await fs.mkdir(packagePath, { recursive: true });
 
       let sdkContents = `export * from "${pkg}";`;
-      if (serviceName) {
-        sdkContents += `\nif(__bootstrap.addAwsSdkInitTask){\n   __bootstrap.addAwsSdkInitTask("${serviceName}");\n}`;
-      }
       await fs.writeFile(sdkIndexFile, sdkContents);
 
       return [pkg, sdkIndexFile];
@@ -541,18 +590,27 @@ async function buildSdks() {
 
   const sdkEntryPoints = Object.fromEntries(sdkEntryList);
 
-  await esbuild.build({
-    entryPoints: sdkEntryPoints,
-    plugins: [awsSdkPlugin, esbuildShimPlugin([[/^bowser$/]])],
-    alias: {
-      "@aws-sdk/util-utf8": "@aws-sdk/util-utf8-browser",
-      "fast-xml-parser": "xml",
-      "@smithy/md5-js": "crypto",
-    },
-    chunkNames: "llrt-[name]-sdk-[hash]",
-    metafile: true,
-    ...ES_BUILD_OPTIONS,
-  });
+  await Promise.all([
+    esbuild.build({
+      entryPoints: sdkEntryPoints,
+      plugins: [AWS_SDK_PLUGIN, esbuildShimPlugin([[/^bowser$/]])],
+      alias: {
+        "@aws-sdk/util-utf8-browser": "@smithy/util-utf8",
+        "@aws-sdk/util-utf8": "@smithy/util-utf8",
+        "@smithy/md5-js": "crypto",
+        "fast-xml-parser": "llrt:xml",
+        uuid: "llrt:uuid",
+      },
+      chunkNames: "llrt-[name]-sdk-[hash]",
+      metafile: true,
+      ...ES_BUILD_OPTIONS,
+    }),
+    esbuild.build({
+      entryPoints: REPLACEMENT_PACKAGES,
+      ...ES_BUILD_OPTIONS,
+      sourcemap: false,
+    }),
+  ]);
 
   //console.log(await esbuild.analyzeMetafile(result.metafile));
 }
@@ -562,9 +620,15 @@ console.log("Building...");
 await createOutputDirectories();
 let error;
 try {
-  await loadShims();
+  if (SDK_BUNDLE_MODE != "NONE") {
+    await loadShims();
+  }
+
   await buildLibrary();
-  await buildSdks();
+
+  if (SDK_BUNDLE_MODE != "NONE") {
+    await buildSdks();
+  }
 } catch (e) {
   error = e;
 }

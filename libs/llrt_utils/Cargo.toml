@@ -1,0 +1,29 @@
+[package]
+name = "llrt_utils"
+description = "LLRT utilities"
+version = "0.4.0-beta"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/awslabs/llrt"
+
+[features]
+default = ["all"]
+all = ["fs", "bytearray-buffer"]
+
+fs = ["tokio/fs"]
+bytearray-buffer = ["tokio/sync"]
+
+[dependencies]
+rquickjs = { git = "https://github.com/DelSkayn/rquickjs.git", version = "0.8.1", features = [
+  "array-buffer",
+  "macro",
+], default-features = false }
+tokio = { version = "1", features = ["sync"] }
+tracing = "0.1"
+
+[dev-dependencies]
+llrt_test = { version = "0.4.0-beta", path = "../llrt_test" }
+tokio = { version = "1", features = ["full"] }
+
+[build-dependencies]
+llrt_build = { version = "0.4.0-beta", path = "../llrt_build" }

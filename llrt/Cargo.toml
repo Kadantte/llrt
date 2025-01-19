@@ -1,0 +1,36 @@
+[package]
+name = "llrt"
+version = "0.4.0-beta"
+edition = "2021"
+license-file = "LICENSE"
+
+[features]
+default = ["macro"]
+macro = ["llrt_core/macro"]
+lambda = ["llrt_core/lambda"]
+no-sdk = ["llrt_core/no-sdk"]
+uncompressed = ["llrt_core/uncompressed"]
+bindgen = ["llrt_core/bindgen"]
+
+[dependencies]
+llrt_core = { path = "../llrt_core" }
+tracing = { version = "0.1.41", features = ["log"] }
+llrt_utils = { path = "../libs/llrt_utils" }
+chrono = { version = "0.4.38", default-features = false, features = ["std"] }
+tracing-core = "0.1.33"
+tokio = { version = "1", features = ["full"] }
+crossterm = { version = "0.28.1" }
+constcat = "0.5.1"
+
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+snmalloc-rs = { version = "0.3.7", features = ["lto"] }
+# FIXME remove when https://github.com/rust-lang/cc-rs/issues/1278 is resolved
+cc = "=1.1.31"
+
+
+[dev-dependencies]
+llrt_test = { version = "0.4.0-beta", path = "../libs/llrt_test" }
+
+[[bin]]
+name = "llrt"
+path = "src/main.rs"
